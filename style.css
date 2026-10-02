@@ -254,6 +254,24 @@ h1 {
     background: var(--blue);
 }
 
+.notice.warning > span {
+    background: #f3e08a;
+    color: #4a3c08;
+}
+
+.notice.warning {
+    color: #5c4b0d;
+    background: #fdf8e3;
+}
+
+.notice.warning a {
+    color: #7a5c00;
+}
+
+.notice.warning a:hover {
+    color: #5a4400;
+}
+
 footer {
     min-height: 64px;
     display: flex;
