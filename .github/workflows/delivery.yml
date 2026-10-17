@@ -35,6 +35,11 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha,prefix=sha-
+          # `latest=auto` (the default) never marks a branch ref as latest, so a
+          # push on master only published `master` and `sha-<sha>`. Only `auto`,
+          # `true` and `false` are valid values, `always` errors out.
+          flavor: |
+            latest=true
 
       # Without an explicit buildx setup the default builder uses the `docker`
       # driver, which rejects `type=gha` cache export unless the runner has the
