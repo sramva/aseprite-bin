@@ -148,6 +148,13 @@ h1 {
     text-decoration: none;
 }
 
+.archives-button::after {
+    font-size: .8em;
+    content: "↗";
+    transform: translate(0%, 10%);
+    padding-left: .5em;
+}
+
 .download-button {
     color: var(--white);
     font-family: inherit;
