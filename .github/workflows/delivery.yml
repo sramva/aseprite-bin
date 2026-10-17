@@ -36,6 +36,12 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=sha-
 
+      # Without an explicit buildx setup the default builder uses the `docker`
+      # driver, which rejects `type=gha` cache export unless the runner has the
+      # containerd image store enabled. GitHub's runners do not.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
