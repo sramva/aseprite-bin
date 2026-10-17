@@ -16,13 +16,17 @@ jobs:
           submodules: recursive
 
       - name: Build
+        id: build
         run: |
           chmod +x ./macos_build.sh
           ./macos_build.sh
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
+      - name: Publish macOS build
+        uses: ./.github/actions/ftp-upload
         with:
-          name: aseprite-macos
-          path: github
-          if-no-files-found: error
+          path: aseprite-${{ steps.build.outputs.ASEPRITE_VERSION }}
+          remote-name: aseprite-macos.zip
+          host: ${{ secrets.FTP_HOST }}
+          user: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWD }}
+          remote-dir: ${{ secrets.FTP_PATH }}

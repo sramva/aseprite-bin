@@ -15,20 +15,27 @@ jobs:
           fetch-depth: 0
 
       - name: Build
+        id: build
         run: |
           chmod +x ./linux_build.sh
           ./linux_build.sh
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
+      - name: Publish AppImage
+        uses: ./.github/actions/ftp-upload
         with:
-          name: aseprite-linux
-          path: github
-          if-no-files-found: error
-
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v7
-        with:
-          name: Aseprite.AppImage
           path: Aseprite.AppImage
-          if-no-files-found: error
+          remote-name: Aseprite.AppImage
+          host: ${{ secrets.FTP_HOST }}
+          user: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWD }}
+          remote-dir: ${{ secrets.FTP_PATH }}
+
+      - name: Publish Linux build
+        uses: ./.github/actions/ftp-upload
+        with:
+          path: aseprite-${{ steps.build.outputs.ASEPRITE_VERSION }}
+          remote-name: aseprite-linux.zip
+          host: ${{ secrets.FTP_HOST }}
+          user: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWD }}
+          remote-dir: ${{ secrets.FTP_PATH }}

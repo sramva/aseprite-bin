@@ -1,0 +1,199 @@
+name: FTP upload
+description: Publish a build output to the delivery FTP server.
+
+inputs:
+  path:
+    description: File or directory to publish. A directory is zipped first.
+    required: true
+  remote-name:
+    description: Name the file is published under on the FTP server.
+    required: true
+  host:
+    description: FTP server host.
+    required: true
+  user:
+    description: FTP user.
+    required: true
+  password:
+    description: FTP password.
+    required: true
+  remote-dir:
+    description: Remote directory the file is published to.
+    required: false
+    default: /
+  port:
+    description: FTP port.
+    required: false
+    default: "21"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        [ -n "$REMOTE_NAME" ] || { echo "::error::remote-name must not be empty"; exit 1; }
+        [ -e "$SOURCE" ] || { echo "::error::nothing to publish at $SOURCE"; exit 1; }
+      env:
+        SOURCE: ${{ inputs.path }}
+        REMOTE_NAME: ${{ inputs.remote-name }}
+
+    # A directory is zipped to STAGING, a file is uploaded where it is, and
+    # STAGED tells the next steps which file to transfer.
+    # The zip runs from inside the directory so the archive holds the build
+    # files at its root instead of nesting them under aseprite-<version>/.
+    # -y / -snl keep symlinks as links: following the ones inside Aseprite.app
+    # would duplicate whole frameworks and produce a broken bundle.
+    - name: Stage
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -d "$SOURCE" ]; then
+          rm -f "$STAGING"
+          ( cd "$SOURCE" && zip -qry "$STAGING" . )
+          staged="$STAGING"
+        elif [ -f "$SOURCE" ]; then
+          staged="$SOURCE"
+        else
+          echo "::error::$SOURCE is neither a file nor a directory"
+          exit 1
+        fi
+        echo "STAGED=$staged" >> "$GITHUB_ENV"
+      env:
+        SOURCE: ${{ inputs.path }}
+        STAGING: ${{ runner.temp }}/${{ inputs.remote-name }}
+
+    - name: Stage
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        if (Test-Path -LiteralPath $env:SOURCE -PathType Container) {
+          Remove-Item -LiteralPath $env:STAGING -ErrorAction Ignore
+          Push-Location -LiteralPath $env:SOURCE
+          try {
+            & "$env:ProgramFiles\7-Zip\7z.exe" a -tzip -bso0 -bsp0 -snl $env:STAGING ".\*"
+            if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
+          $staged = $env:STAGING
+        } elseif (Test-Path -LiteralPath $env:SOURCE -PathType Leaf) {
+          $staged = $env:SOURCE
+        } else {
+          throw "$($env:SOURCE) is neither a file nor a directory"
+        }
+        Add-Content -Path $env:GITHUB_ENV -Value "STAGED=$staged"
+      env:
+        SOURCE: ${{ inputs.path }}
+        STAGING: ${{ runner.temp }}\${{ inputs.remote-name }}
+
+    # Credentials go through --user rather than being embedded in the URL:
+    # the FTP password holds characters that would otherwise need percent
+    # encoding, and it keeps the URL (which curl echoes on error) secret-free.
+    - name: Upload
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        dir="${FTP_DIR%/}"
+        curl --fail --silent --show-error \
+          --user "$FTP_USER:$FTP_PASSWORD" \
+          --connect-timeout 30 \
+          --retry 5 --retry-delay 10 \
+          --ftp-create-dirs \
+          --upload-file "$STAGED" \
+          "ftp://$FTP_HOST:$FTP_PORT$dir/$REMOTE_NAME"
+        echo "Published $REMOTE_NAME ($(du -h "$STAGED" | cut -f1)) to ftp://$FTP_HOST:$FTP_PORT$dir/"
+      env:
+        FTP_HOST: ${{ inputs.host }}
+        FTP_USER: ${{ inputs.user }}
+        FTP_PASSWORD: ${{ inputs.password }}
+        FTP_DIR: ${{ inputs.remote-dir }}
+        FTP_PORT: ${{ inputs.port }}
+        REMOTE_NAME: ${{ inputs.remote-name }}
+
+    - name: Upload
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Use the system curl: Git for Windows bundles an older one.
+        $dir = $env:FTP_DIR.TrimEnd('/')
+        $url = "ftp://$($env:FTP_HOST):$($env:FTP_PORT)$dir/$($env:REMOTE_NAME)"
+        & "$env:SystemRoot\System32\curl.exe" `
+          --fail --silent --show-error `
+          --user "$($env:FTP_USER):$($env:FTP_PASSWORD)" `
+          --connect-timeout 30 `
+          --retry 5 --retry-delay 10 `
+          --ftp-create-dirs `
+          --upload-file $env:STAGED `
+          $url
+        if ($LASTEXITCODE -ne 0) { throw "curl upload failed with exit code $LASTEXITCODE" }
+        $size = [math]::Round((Get-Item -LiteralPath $env:STAGED).Length / 1MB, 1)
+        "Published $($env:REMOTE_NAME) ($size MB) to $url"
+      env:
+        FTP_HOST: ${{ inputs.host }}
+        FTP_USER: ${{ inputs.user }}
+        FTP_PASSWORD: ${{ inputs.password }}
+        FTP_DIR: ${{ inputs.remote-dir }}
+        FTP_PORT: ${{ inputs.port }}
+        REMOTE_NAME: ${{ inputs.remote-name }}
+
+    # A truncated upload still exits 0, and the delivery app streams these files
+    # straight to users: confirm the server stored every byte before moving on.
+    - name: Verify size
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        dir="${FTP_DIR%/}"
+        local_size="$(wc -c < "$STAGED" | tr -d '[:space:]')"
+        # FTP replies end lines with CRLF, so strip it before comparing.
+        remote_size="$(curl --fail --silent --show-error \
+          --user "$FTP_USER:$FTP_PASSWORD" \
+          --head "ftp://$FTP_HOST:$FTP_PORT$dir/$REMOTE_NAME" \
+          | tr -d '\r' \
+          | awk 'tolower($1) == "content-length:" { print $2; exit }')"
+        if [ -z "$remote_size" ]; then
+          echo "::warning::server reported no size for $REMOTE_NAME"
+        elif [ "$remote_size" != "$local_size" ]; then
+          echo "::error::truncated upload: $local_size bytes sent, $remote_size bytes stored"
+          exit 1
+        else
+          echo "Verified $REMOTE_NAME ($local_size bytes)"
+        fi
+      env:
+        FTP_HOST: ${{ inputs.host }}
+        FTP_USER: ${{ inputs.user }}
+        FTP_PASSWORD: ${{ inputs.password }}
+        FTP_DIR: ${{ inputs.remote-dir }}
+        FTP_PORT: ${{ inputs.port }}
+        REMOTE_NAME: ${{ inputs.remote-name }}
+
+    - name: Verify size
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $dir = $env:FTP_DIR.TrimEnd('/')
+        $localSize = (Get-Item -LiteralPath $env:STAGED).Length
+        $headers = & "$env:SystemRoot\System32\curl.exe" `
+          --fail --silent --show-error `
+          --user "$($env:FTP_USER):$($env:FTP_PASSWORD)" `
+          --head "ftp://$($env:FTP_HOST):$($env:FTP_PORT)$dir/$($env:REMOTE_NAME)"
+        if ($LASTEXITCODE -ne 0) { throw "curl HEAD failed with exit code $LASTEXITCODE" }
+        $line = $headers -split "`r?`n" | Where-Object { $_ -match '^content-length:' } | Select-Object -First 1
+        if (-not $line) {
+          "::warning::server reported no size for $($env:REMOTE_NAME)"
+        } elseif ([int](($line -split ':')[1].Trim()) -ne $localSize) {
+          throw "truncated upload: $localSize bytes sent, $(($line -split ':')[1].Trim()) bytes stored"
+        } else {
+          "Verified $($env:REMOTE_NAME) ($localSize bytes)"
+        }
+      env:
+        FTP_HOST: ${{ inputs.host }}
+        FTP_USER: ${{ inputs.user }}
+        FTP_PASSWORD: ${{ inputs.password }}
+        FTP_DIR: ${{ inputs.remote-dir }}
+        FTP_PORT: ${{ inputs.port }}
+        REMOTE_NAME: ${{ inputs.remote-name }}

@@ -126,7 +126,5 @@ xcopy /E /Q /Y build\bin\aseprite.exe aseprite-%ASEPRITE_VERSION%\
 xcopy /E /Q /Y build\bin\data aseprite-%ASEPRITE_VERSION%\data\
 
 if "%GITHUB_WORKFLOW%" neq "" (
-  mkdir github
-  move aseprite-%ASEPRITE_VERSION% github\
   echo ASEPRITE_VERSION=%ASEPRITE_VERSION%>>"%GITHUB_OUTPUT%"
 )

@@ -79,9 +79,6 @@ cp -R "${ASEPRITE_DIR}/docs" "${OUTDIR}/docs" 2>/dev/null || true
 echo "# This file is here so Aseprite behaves as a portable program" > "${OUTDIR}/aseprite.ini"
 
 if [ -n "${GITHUB_WORKFLOW:-}" ]; then
-  mkdir -p "${WORKDIR}/github"
-  rm -rf "${WORKDIR}/github/${OUTDIR##*/}"
-  mv "${OUTDIR}" "${WORKDIR}/github/"
   echo "ASEPRITE_VERSION=${ASEPRITE_VERSION}" >> "${GITHUB_OUTPUT:-/dev/null}" || true
 fi
 
