@@ -1,3 +1,4 @@
-flask
+prometheus-client
 python-dotenv
 gunicorn
+flask

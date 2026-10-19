@@ -3,7 +3,8 @@ from flask import Flask, Response, abort
 from ftplib import FTP, all_errors, error_perm
 from mimetypes import guess_type
 from os import getenv
-from os import path
+
+from prometheus_client import generate_latest, Counter, CONTENT_TYPE_LATEST
 
 
 load_dotenv()
@@ -22,18 +23,27 @@ ACCEPTED_FILENAMES = [
     "aseprite-macos.zip"
 ]
 
+DOWNLOADED_FILES_COUNTER = Counter("aseprite_download_filename", "Counter of downloads by filename", ["filename"])
+
 app = Flask(__name__)
 
 @app.route("/")
 def index_route():
     return abort(404)
 
+@app.route("/metrics")
+def metrics_route():
+    return Response(
+        generate_latest(),
+        mimetype=CONTENT_TYPE_LATEST
+    )
+
 @app.route("/<filename>")
 def serve_file(filename):
     if filename not in ACCEPTED_FILENAMES:
         return abort(403)
 
-    fullpath = path.join(FTP_PATH, filename)
+    fullpath = FTP_PATH + "/" + filename
 
     try:
         ftp = FTP(
@@ -71,6 +81,8 @@ def serve_file(filename):
             raise OSError(
                 f"truncated transfer: got {sent} bytes out of {size}"
             )
+            
+    DOWNLOADED_FILES_COUNTER.labels(filename=filename).inc()
 
     response = Response(
         chunks(),
