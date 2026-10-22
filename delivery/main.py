@@ -4,7 +4,7 @@ from ftplib import FTP, all_errors, error_perm
 from mimetypes import guess_type
 from os import getenv
 
-from prometheus_client import generate_latest, Counter, CONTENT_TYPE_LATEST
+from prometheus_client import generate_latest, Gauge, CONTENT_TYPE_LATEST
 
 
 load_dotenv()
@@ -23,7 +23,7 @@ ACCEPTED_FILENAMES = [
     "aseprite-macos.zip"
 ]
 
-DOWNLOADED_FILES_COUNTER = Counter("aseprite_download_filename", "Counter of downloads by filename", ["filename"])
+DOWNLOADED_FILES_COUNTER = Gauge("aseprite_download_filename", "Counter of downloads by filename", ["filename"])
 
 app = Flask(__name__)
 
